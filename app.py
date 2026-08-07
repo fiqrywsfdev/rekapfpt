@@ -2,166 +2,201 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 from io import BytesIO
-import datetime
+import os
 
-st.set_page_config(page_title="Aplikasi Rekap Pengajuan Transfer WSF", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Aplikasi Rekap & Verifikasi Transfer WSF", layout="wide", page_icon="📊")
 
-st.title("📊 Aplikasi Rekap Otomatis Form Pengajuan Transfer WSF")
+st.title("📊 Aplikasi Rekap Otomatis & Verifikasi Rekening Supplier WSF")
 st.markdown("""
-Aplikasi ini digunakan untuk **merekap seluruh data pengajuan transfer** dari file Excel WSF secara otomatis per baris lengkap.
-Hasil rekap memuat: **Hari, Tanggal, Supplier, BW/Ukuran, Tonase (Kg), Harga (Rp), Total (Rp), Bank, Nomor Rekening, Nama Rekening, Nominal Transfer (Rp), dan Keterangan/Status (DP/Pelunasan/Frozen/PUJ/WBS)**.
-
-*Kata-kata pengesahan seperti "Diajukan oleh", "Mengetahui", "Alfian", "Achmad Kohar", "Adm. Trading", dll. otomatis dibersihkan.*
+Aplikasi ini secara otomatis **merekap seluruh data pengajuan transfer (FPT)** dan melakukan **verifikasi/validasi nomor rekening** pengajuan terhadap **Database Master Rekening Supplier**.
 """)
 
-uploaded_files = st.file_uploader("Upload File Form Pengajuan Transfer (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+st.sidebar.header("📁 Upload File")
+uploaded_fpt = st.sidebar.file_uploader("Upload File FPT Pengajuan (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 
 EXCLUDE_WORDS = [
     "DIAJUKAN OLEH", "MENGETAHUI", "ALFIAN", "ACHMAD KOHAR", 
     "KANTOR PUSAT", "ADM. TRADING", "MANAJER SBB", "SBB KANTOR PUSAT",
-    "TOTAL", "GRAND TOTAL", "FORM PENGAJUAN BANK KELUAR", "SARANA BERKAH BERSAMA"
+    "TOTAL", "GRAND TOTAL", "FORM PENGAJUAN BANK KELUAR", "SARANA BERKAH BERSAMA", "SUPPLIER"
 ]
 
+# Fungsi membersihkan nomor rekening (menghapus spasi, strip, dll)
+def clean_str(val):
+    if pd.isna(val) or val is None:
+        return ""
+    s = str(val).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s.replace(" ", "").replace("-", "")
+
+# 1. Baca Database Master secara Otomatis dari folder aplikasi (GitHub)
+@st.cache_data
+def load_master_database():
+    db_filename = 'database rekening supplier.xlsx'
+    if os.path.exists(db_filename):
+        try:
+            df_db = pd.read_excel(db_filename)
+            db_map = {}
+            for _, r in df_db.iterrows():
+                # Pastikan nama kolom sesuai dengan file asli
+                supp_name = str(r['Supplier']).strip().upper() if pd.notna(r['Supplier']) else ""
+                norek_val = clean_str(r['No. Rekening'])
+                namarek_val = str(r['Atas Nama']).strip() if pd.notna(r['Atas Nama']) else ""
+                
+                # Karena satu supplier bisa beda wilayah/rekening, kita simpan dalam bentuk list
+                if supp_name:
+                    if supp_name not in db_map:
+                        db_map[supp_name] = []
+                    db_map[supp_name].append({'norek': norek_val, 'namarek': namarek_val})
+            return db_map
+        except Exception as e:
+            st.sidebar.error(f"Error membaca database: {e}")
+            return None
+    return None
+
+master_db = load_master_database()
+
+if master_db:
+    st.sidebar.success("✅ Database Master Otomatis Terhubung!")
+else:
+    st.sidebar.error("❌ File 'database rekening supplier.xlsx' tidak ditemukan di sistem. Pastikan file sudah di-upload ke GitHub.")
+
+# 2. Fungsi proses file FPT Excel
 def process_file(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
     all_rows = []
     
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=None)
+        current_hari, current_tanggal = "", ""
+        num_rows, num_cols = len(df), len(df.columns)
         
-        current_hari = ""
-        current_tanggal = None
-        
-        num_rows = len(df)
-        num_cols = len(df.columns)
-        
-        # Check alignment shift
-        # In 'RPA TF', data starts at col 1. In 'RPA RK', data starts at col 0.
         i = 0
         while i < num_rows:
             row_vals = [str(val).strip() if pd.notna(val) else "" for val in df.iloc[i].values]
             row_str_upper = " ".join(row_vals).upper()
             
-            # Extract Hari & Tanggal header
-            for col_idx in range(num_cols - 1):
+            for col_idx in range(num_cols):
                 cell_val = str(df.iloc[i, col_idx]).strip()
-                next_val = str(df.iloc[i, col_idx + 1]).strip() if col_idx + 1 < num_cols else ""
-                
-                if "HARI" in cell_val.upper() and ":" in cell_val.upper():
+                if "HARI" in cell_val.upper() and ":" in cell_val:
                     current_hari = cell_val.split(":")[-1].strip()
-                    if not current_hari and next_val:
-                        current_hari = next_val
-                elif cell_val.upper() == "HARI" and next_val:
-                    current_hari = next_val.replace(":", "").strip()
-                    
-                if "TANGGAL" in cell_val.upper() and ":" in cell_val.upper():
-                    raw_tgl = cell_val.split(":")[-1].strip()
-                    if not raw_tgl and next_val:
-                        raw_tgl = next_val
-                    current_tanggal = raw_tgl
-                elif cell_val.upper() == "TANGGAL" and next_val:
-                    current_tanggal = next_val.replace(":", "").strip()
+                if "TANGGAL" in cell_val.upper() and ":" in cell_val:
+                    current_tanggal = cell_val.split(":")[-1].strip()
 
-            # Identify data row start
-            # Check if any excluded words match
-            if any(exc in row_str_upper for exc in EXCLUDE_WORDS):
+            if any(exc in row_str_upper for exc in ["DIAJUKAN OLEH", "MENGETAHUI", "ALFIAN", "ACHMAD KOHAR", "ADM. TRADING", "MANAJER SBB"]):
                 i += 1
                 continue
                 
-            # Find candidate data row
-            # Case 1: RPA TF offset (col 1 is supplier)
-            col_supp = 1 if (num_cols > 10 and str(df.iloc[i, 1]).strip() != "") else 0
-            
+            col_supp = 1 if (num_cols > 10 and df.iloc[i, 1] is not None and str(df.iloc[i, 1]).strip() != "") else 0
             supp_val = str(df.iloc[i, col_supp]).strip() if pd.notna(df.iloc[i, col_supp]) else ""
             
-            if supp_val and supp_val.upper() not in EXCLUDE_WORDS and not supp_val.upper().startswith("SUPPLIER"):
-                # Check if next columns have numeric values (tonase / harga / total)
+            if supp_val and not any(exc in supp_val.upper() for exc in EXCLUDE_WORDS):
                 try:
                     bw = str(df.iloc[i, col_supp + 1]).strip() if pd.notna(df.iloc[i, col_supp + 1]) else ""
-                    tonase = df.iloc[i, col_supp + 2]
-                    harga = df.iloc[i, col_supp + 3]
-                    total = df.iloc[i, col_supp + 4]
+                    tonase = pd.to_numeric(df.iloc[i, col_supp + 2], errors='coerce')
+                    harga = pd.to_numeric(df.iloc[i, col_supp + 3], errors='coerce')
+                    total = pd.to_numeric(df.iloc[i, col_supp + 4], errors='coerce')
                     bank = str(df.iloc[i, col_supp + 5]).strip() if pd.notna(df.iloc[i, col_supp + 5]) else ""
                     norek = str(df.iloc[i, col_supp + 6]).strip() if pd.notna(df.iloc[i, col_supp + 6]) else ""
-                    nominal = df.iloc[i, col_supp + 7] if col_supp + 7 < num_cols else total
+                    nominal = pd.to_numeric(df.iloc[i, col_supp + 7], errors='coerce') if col_supp + 7 < num_cols else total
                     ket = str(df.iloc[i, col_supp + 8]).strip() if col_supp + 8 < num_cols and pd.notna(df.iloc[i, col_supp + 8]) else ""
                     
-                    # Next row usually contains Nama Rekening
                     namarek = ""
                     if i + 1 < num_rows:
                         next_row_val = str(df.iloc[i + 1, col_supp + 6]).strip() if pd.notna(df.iloc[i + 1, col_supp + 6]) else ""
-                        if next_row_val and next_row_val.upper() not in EXCLUDE_WORDS:
+                        if next_row_val and not any(exc in next_row_val.upper() for exc in EXCLUDE_WORDS):
                             namarek = next_row_val
                     
-                    # Ensure tonase and total are numbers
-                    tonase_num = pd.to_numeric(tonase, errors='coerce')
-                    total_num = pd.to_numeric(total, errors='coerce')
-                    nominal_num = pd.to_numeric(nominal, errors='coerce')
-                    harga_num = pd.to_numeric(harga, errors='coerce')
-                    
-                    if pd.notna(tonase_num) or pd.notna(total_num):
+                    if pd.notna(tonase) or pd.notna(total):
                         all_rows.append({
                             'SHEET': sheet_name,
                             'HARI': current_hari,
                             'TANGGAL': current_tanggal,
                             'SUPPLIER': supp_val,
                             'BW / UKURAN': bw,
-                            'TONASE (KG)': tonase_num,
-                            'HARGA (RP)': harga_num,
-                            'TOTAL (RP)': total_num,
+                            'TONASE (KG)': tonase,
+                            'HARGA (RP)': harga,
+                            'TOTAL (RP)': total,
                             'BANK': bank,
                             'NOMOR REKENING': norek,
                             'NAMA REKENING': namarek,
-                            'NOMINAL TRANSFER (RP)': nominal_num if pd.notna(nominal_num) else total_num,
+                            'NOMINAL TRANSFER (RP)': nominal if pd.notna(nominal) else total,
                             'KETERANGAN / STATUS': ket
                         })
-                        i += 1 # skip next sub-row if processed
-                except Exception as e:
+                except Exception:
                     pass
             i += 1
             
     return pd.DataFrame(all_rows)
 
-if uploaded_files:
-    dfs = []
-    for f in uploaded_files:
-        df_res = process_file(f)
-        dfs.append(df_res)
-        
+if uploaded_fpt:
+    dfs = [process_file(f) for f in uploaded_fpt]
     final_df = pd.concat(dfs, ignore_index=True)
+    final_df.insert(0, 'NO', range(1, 1 + len(final_df)))
     
-    st.success(f"Berhasil merekap total **{len(final_df):,}** baris transaksi!")
+    # 3. PROSES VERIFIKASI DENGAN DATABASE MASTER REKENING
+    if master_db is not None:
+        status_verifikasi = []
+        referensi_db = []
+
+        for _, row in final_df.iterrows():
+            supp_fpt = str(row['SUPPLIER']).strip().upper()
+            norek_fpt = clean_str(row['NOMOR REKENING'])
+            
+            # Cek kecocokan supplier (pakai pengecekan kemiripan jika tidak persis)
+            matched_supplier = None
+            for db_supp_key in master_db:
+                # Mengabaikan PT, CV, dll di pengecekan dasar untuk fleksibilitas
+                if db_supp_key in supp_fpt or supp_fpt in db_supp_key:
+                    matched_supplier = db_supp_key
+                    break
+            
+            if matched_supplier:
+                list_rek = master_db[matched_supplier]
+                
+                # Pengecekan apakah nomor rekening cocok dengan salah satu list rekening dari database
+                is_match = False
+                ref_texts = []
+                for rek_data in list_rek:
+                    ref_texts.append(f"{rek_data['norek']} ({rek_data['namarek']})")
+                    if norek_fpt == rek_data['norek']:
+                        is_match = True
+                        
+                referensi_db.append(" | ".join(ref_texts))
+                
+                if is_match:
+                    status_verifikasi.append("✅ MATCH / SESUAI")
+                else:
+                    status_verifikasi.append("⚠️ BEDA REKENING!")
+            else:
+                status_verifikasi.append("❓ SUPPLIER TIDAK TERDAFTAR")
+                referensi_db.append("-")
+
+        final_df['STATUS REKENING (VERIFIKASI)'] = status_verifikasi
+        final_df['REKENING DATABASE (REFERENSI)'] = referensi_db
+
+    st.success(f"Berhasil merekap **{len(final_df):,}** baris transaksi!")
     
-    # Filter controls
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        search_supp = st.text_input("Filter Nama Supplier:")
-    with col2:
-        status_opts = ["Semua"] + list(final_df['KETERANGAN / STATUS'].dropna().unique())
-        selected_status = st.selectbox("Filter Status/Keterangan:", status_opts)
-    with col3:
-        sheet_opts = ["Semua"] + list(final_df['SHEET'].dropna().unique())
-        selected_sheet = st.selectbox("Filter Sheet:", sheet_opts)
+    if 'STATUS REKENING (VERIFIKASI)' in final_df.columns:
+        jml_beda = (final_df['STATUS REKENING (VERIFIKASI)'] == "⚠️ BEDA REKENING!").sum()
+        jml_tidak_terdaftar = (final_df['STATUS REKENING (VERIFIKASI)'] == "❓ SUPPLIER TIDAK TERDAFTAR").sum()
         
-    filtered_df = final_df.copy()
-    if search_supp:
-        filtered_df = filtered_df[filtered_df['SUPPLIER'].astype(str).str.contains(search_supp, case=False, na=False)]
-    if selected_status != "Semua":
-        filtered_df = filtered_df[filtered_df['KETERANGAN / STATUS'] == selected_status]
-    if selected_sheet != "Semua":
-        filtered_df = filtered_df[filtered_df['SHEET'] == selected_sheet]
-        
-    st.dataframe(filtered_df, use_container_width=True)
+        col1, col2 = st.columns(2)
+        if jml_beda > 0:
+            col1.error(f"⚠️ Ditemukan **{jml_beda}** pengajuan dengan REKENING BEDA/SALAH!")
+        if jml_tidak_terdaftar > 0:
+            col2.warning(f"❓ Terdapat **{jml_tidak_terdaftar}** Supplier yang belum ada di Database!")
     
-    # Download Excel Button
+    st.dataframe(final_df, use_container_width=True)
+    
+    # Download Hasil
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        filtered_df.to_excel(writer, index=False, sheet_name='Rekap Total')
-    excel_data = output.getvalue()
+        final_df.to_excel(writer, index=False, sheet_name='Rekap Total & Verifikasi')
     
     st.download_button(
-        label="📥 Download Hasil Rekapitulasi (.xlsx)",
-        data=excel_data,
-        file_name="REKAP_TOTAL_PENGAJUAN_TRANSFER_WSF.xlsx",
+        label="📥 Download Hasil Rekapitulasi & Verifikasi (.xlsx)",
+        data=output.getvalue(),
+        file_name="REKAP_TOTAL_VERIFIKASI_TRANSFER_WSF.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
