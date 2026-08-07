@@ -20,7 +20,6 @@ EXCLUDE_WORDS = [
     "TOTAL", "GRAND TOTAL", "FORM PENGAJUAN BANK KELUAR", "SARANA BERKAH BERSAMA", "SUPPLIER"
 ]
 
-# Fungsi membersihkan nomor rekening (menghapus spasi, strip, dll)
 def clean_str(val):
     if pd.isna(val) or val is None:
         return ""
@@ -29,39 +28,41 @@ def clean_str(val):
         s = s[:-2]
     return s.replace(" ", "").replace("-", "")
 
-# 1. Baca Database Master secara Otomatis dari folder aplikasi (GitHub)
+# 1. Baca Database Master secara Otomatis dari folder aplikasi (Aman dari perbedaan huruf besar/kecil)
 @st.cache_data
 def load_master_database():
-    db_filename = 'database rekening supplier.xlsx'
-    if os.path.exists(db_filename):
+    db_filename = None
+    # Pencarian file fleksibel
+    for f in os.listdir('.'):
+        if 'database' in f.lower() and 'rekening' in f.lower() and f.endswith('.xlsx'):
+            db_filename = f
+            break
+            
+    if db_filename and os.path.exists(db_filename):
         try:
             df_db = pd.read_excel(db_filename)
             db_map = {}
             for _, r in df_db.iterrows():
-                # Pastikan nama kolom sesuai dengan file asli
                 supp_name = str(r['Supplier']).strip().upper() if pd.notna(r['Supplier']) else ""
                 norek_val = clean_str(r['No. Rekening'])
                 namarek_val = str(r['Atas Nama']).strip() if pd.notna(r['Atas Nama']) else ""
                 
-                # Karena satu supplier bisa beda wilayah/rekening, kita simpan dalam bentuk list
                 if supp_name:
                     if supp_name not in db_map:
                         db_map[supp_name] = []
                     db_map[supp_name].append({'norek': norek_val, 'namarek': namarek_val})
-            return db_map
+            return db_map, db_filename
         except Exception as e:
-            st.sidebar.error(f"Error membaca database: {e}")
-            return None
-    return None
+            return None, str(e)
+    return None, "File tidak ditemukan"
 
-master_db = load_master_database()
+master_db, db_info = load_master_database()
 
 if master_db:
-    st.sidebar.success("✅ Database Master Otomatis Terhubung!")
+    st.sidebar.success(f"✅ Database Master Terhubung! ({db_info})")
 else:
-    st.sidebar.error("❌ File 'database rekening supplier.xlsx' tidak ditemukan di sistem. Pastikan file sudah di-upload ke GitHub.")
+    st.sidebar.error(f"❌ Database belum terbaca. Status: {db_info}")
 
-# 2. Fungsi proses file FPT Excel
 def process_file(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
     all_rows = []
@@ -134,7 +135,6 @@ if uploaded_fpt:
     final_df = pd.concat(dfs, ignore_index=True)
     final_df.insert(0, 'NO', range(1, 1 + len(final_df)))
     
-    # 3. PROSES VERIFIKASI DENGAN DATABASE MASTER REKENING
     if master_db is not None:
         status_verifikasi = []
         referensi_db = []
@@ -143,18 +143,14 @@ if uploaded_fpt:
             supp_fpt = str(row['SUPPLIER']).strip().upper()
             norek_fpt = clean_str(row['NOMOR REKENING'])
             
-            # Cek kecocokan supplier (pakai pengecekan kemiripan jika tidak persis)
             matched_supplier = None
             for db_supp_key in master_db:
-                # Mengabaikan PT, CV, dll di pengecekan dasar untuk fleksibilitas
                 if db_supp_key in supp_fpt or supp_fpt in db_supp_key:
                     matched_supplier = db_supp_key
                     break
             
             if matched_supplier:
                 list_rek = master_db[matched_supplier]
-                
-                # Pengecekan apakah nomor rekening cocok dengan salah satu list rekening dari database
                 is_match = False
                 ref_texts = []
                 for rek_data in list_rek:
@@ -189,7 +185,6 @@ if uploaded_fpt:
     
     st.dataframe(final_df, use_container_width=True)
     
-    # Download Hasil
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         final_df.to_excel(writer, index=False, sheet_name='Rekap Total & Verifikasi')
