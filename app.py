@@ -2,17 +2,11 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 from io import BytesIO
-import os
 
-st.set_page_config(page_title="Aplikasi Rekap & Verifikasi Transfer WSF", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Aplikasi Rekap Pengajuan Transfer WSF", layout="wide", page_icon="📊")
 
-st.title("📊 Aplikasi Rekap Otomatis & Verifikasi Rekening Supplier WSF")
-st.markdown("""
-Aplikasi ini secara otomatis **merekap seluruh data pengajuan transfer (FPT)** dan melakukan **verifikasi nomor rekening** pengajuan terhadap **Database Master Rekening Supplier**.
-""")
-
-st.sidebar.header("📁 Upload File")
-uploaded_fpt = st.sidebar.file_uploader("Upload File FPT Pengajuan (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+st.title("📊 Aplikasi Rekap Otomatis Form Pengajuan Transfer WSF")
+st.markdown("Upload file Excel pengajuan transfer (.xlsx) untuk merekap secara otomatis per baris lengkap.")
 
 EXCLUDE_WORDS = [
     "DIAJUKAN OLEH", "MENGETAHUI", "ALFIAN", "ACHMAD KOHAR", 
@@ -20,49 +14,6 @@ EXCLUDE_WORDS = [
     "TOTAL", "GRAND TOTAL", "FORM PENGAJUAN BANK KELUAR", "SARANA BERKAH BERSAMA", "SUPPLIER"
 ]
 
-def clean_str(val):
-    if pd.isna(val) or val is None:
-        return ""
-    s = str(val).strip()
-    if s.endswith('.0'):
-        s = s[:-2]
-    return s.replace(" ", "").replace("-", "")
-
-# 1. Load Database Master
-@st.cache_data
-def load_master_database():
-    db_filename = None
-    for f in os.listdir('.'):
-        if 'database' in f.lower() and 'rekening' in f.lower() and f.endswith('.xlsx'):
-            db_filename = f
-            break
-            
-    if db_filename and os.path.exists(db_filename):
-        try:
-            df_db = pd.read_excel(db_filename)
-            db_map = {}
-            for _, r in df_db.iterrows():
-                supp_name = str(r['Supplier']).strip().upper() if pd.notna(r['Supplier']) else ""
-                norek_val = clean_str(r['No. Rekening'])
-                namarek_val = str(r['Atas Nama']).strip() if pd.notna(r['Atas Nama']) else ""
-                
-                if supp_name:
-                    if supp_name not in db_map:
-                        db_map[supp_name] = []
-                    db_map[supp_name].append({'norek': norek_val, 'namarek': namarek_val})
-            return db_map, db_filename
-        except Exception as e:
-            return None, str(e)
-    return None, "File tidak ditemukan"
-
-master_db, db_info = load_master_database()
-
-if master_db:
-    st.sidebar.success(f"✅ Database Master Terhubung! ({db_info})")
-else:
-    st.sidebar.error(f"❌ Database belum terbaca. Status: {db_info}")
-
-# 2. Fungsi Olah File FPT (Dengan Logika Hari & Tanggal Asli yang Bekerja)
 def process_file(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
     all_rows = []
@@ -77,27 +28,15 @@ def process_file(uploaded_file):
             row_vals = [str(val).strip() if pd.notna(val) else "" for val in df.iloc[i].values]
             row_str_upper = " ".join(row_vals).upper()
             
-            # Pindai Hari & Tanggal langsung dari setiap baris sel
+            # Ambil Hari & Tanggal Header
             for col_idx in range(num_cols):
-                cell_raw = df.iloc[i, col_idx]
-                cell_val = str(cell_raw).strip() if pd.notna(cell_raw) else ""
-                cell_upper = cell_val.upper()
-                
-                if "HARI" in cell_upper and ":" in cell_val:
+                cell_val = str(df.iloc[i, col_idx]).strip()
+                if "HARI" in cell_val.upper() and ":" in cell_val:
                     current_hari = cell_val.split(":")[-1].strip()
-                elif "HARI" in cell_upper and col_idx + 1 < num_cols and pd.notna(df.iloc[i, col_idx + 1]):
-                    next_v = str(df.iloc[i, col_idx + 1]).replace(":", "").strip()
-                    if next_v: current_hari = next_v
-
-                if "TANGGAL" in cell_upper and ":" in cell_val:
+                if "TANGGAL" in cell_val.upper() and ":" in cell_val:
                     current_tanggal = cell_val.split(":")[-1].strip()
-                elif "TANGGAL" in cell_upper and col_idx + 1 < num_cols and pd.notna(df.iloc[i, col_idx + 1]):
-                    next_v = df.iloc[i, col_idx + 1]
-                    if isinstance(next_v, pd.Timestamp):
-                        current_tanggal = next_v.strftime('%d/%m/%Y')
-                    else:
-                        current_tanggal = str(next_v).replace(":", "").strip()
 
+            # Filter kata pengesahan / tanda tangan
             if any(exc in row_str_upper for exc in ["DIAJUKAN OLEH", "MENGETAHUI", "ALFIAN", "ACHMAD KOHAR", "ADM. TRADING", "MANAJER SBB"]):
                 i += 1
                 continue
@@ -116,6 +55,7 @@ def process_file(uploaded_file):
                     nominal = pd.to_numeric(df.iloc[i, col_supp + 7], errors='coerce') if col_supp + 7 < num_cols else total
                     ket = str(df.iloc[i, col_supp + 8]).strip() if col_supp + 8 < num_cols and pd.notna(df.iloc[i, col_supp + 8]) else ""
                     
+                    # Mengambil Nama Rekening dari baris di bawahnya
                     namarek = ""
                     if i + 1 < num_rows:
                         next_row_val = str(df.iloc[i + 1, col_supp + 6]).strip() if pd.notna(df.iloc[i + 1, col_supp + 6]) else ""
@@ -144,68 +84,24 @@ def process_file(uploaded_file):
             
     return pd.DataFrame(all_rows)
 
-if uploaded_fpt:
-    dfs = [process_file(f) for f in uploaded_fpt]
+uploaded_files = st.file_uploader("Upload File Form Pengajuan Transfer (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+
+if uploaded_files:
+    dfs = [process_file(f) for f in uploaded_files]
     final_df = pd.concat(dfs, ignore_index=True)
     final_df.insert(0, 'NO', range(1, 1 + len(final_df)))
     
-    if master_db is not None:
-        status_verifikasi = []
-        referensi_db = []
-
-        for _, row in final_df.iterrows():
-            supp_fpt = str(row['SUPPLIER']).strip().upper()
-            norek_fpt = clean_str(row['NOMOR REKENING'])
-            
-            matched_supplier = None
-            for db_supp_key in master_db:
-                if db_supp_key in supp_fpt or supp_fpt in db_supp_key:
-                    matched_supplier = db_supp_key
-                    break
-            
-            if matched_supplier:
-                list_rek = master_db[matched_supplier]
-                is_match = False
-                ref_texts = []
-                for rek_data in list_rek:
-                    ref_texts.append(f"{rek_data['norek']} ({rek_data['namarek']})")
-                    if norek_fpt == rek_data['norek']:
-                        is_match = True
-                        
-                referensi_db.append(" | ".join(ref_texts))
-                
-                if is_match:
-                    status_verifikasi.append("✅ MATCH / SESUAI")
-                else:
-                    status_verifikasi.append("⚠️ BEDA REKENING!")
-            else:
-                status_verifikasi.append("❓ SUPPLIER TIDAK TERDAFTAR")
-                referensi_db.append("-")
-
-        final_df['STATUS REKENING (VERIFIKASI)'] = status_verifikasi
-        final_df['REKENING DATABASE (REFERENSI)'] = referensi_db
-
-    st.success(f"Berhasil merekap **{len(final_df):,}** baris transaksi!")
-    
-    if 'STATUS REKENING (VERIFIKASI)' in final_df.columns:
-        jml_beda = (final_df['STATUS REKENING (VERIFIKASI)'] == "⚠️ BEDA REKENING!").sum()
-        jml_tidak_terdaftar = (final_df['STATUS REKENING (VERIFIKASI)'] == "❓ SUPPLIER TIDAK TERDAFTAR").sum()
-        
-        col1, col2 = st.columns(2)
-        if jml_beda > 0:
-            col1.error(f"⚠️ Ditemukan **{jml_beda}** pengajuan dengan REKENING BEDA/SALAH!")
-        if jml_tidak_terdaftar > 0:
-            col2.warning(f"❓ Terdapat **{jml_tidak_terdaftar}** Supplier yang belum ada di Database!")
-    
+    st.success(f"Berhasil merekap **{len(final_df):,}** baris transaksi secara otomatis!")
     st.dataframe(final_df, use_container_width=True)
     
+    # Fitur Download File Hasil Rekap
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        final_df.to_excel(writer, index=False, sheet_name='Rekap Total & Verifikasi')
+        final_df.to_excel(writer, index=False, sheet_name='Rekap Total')
     
     st.download_button(
-        label="📥 Download Hasil Rekapitulasi & Verifikasi (.xlsx)",
+        label="📥 Download Hasil Rekapitulasi (.xlsx)",
         data=output.getvalue(),
-        file_name="REKAP_TOTAL_VERIFIKASI_TRANSFER_WSF.xlsx",
+        file_name="HASIL_REKAP_PENGAJUAN_TRANSFER.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
