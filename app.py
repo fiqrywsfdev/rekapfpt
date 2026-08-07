@@ -3,13 +3,12 @@ import pandas as pd
 import openpyxl
 from io import BytesIO
 import os
-import re
 
 st.set_page_config(page_title="Aplikasi Rekap & Verifikasi Transfer WSF", layout="wide", page_icon="📊")
 
 st.title("📊 Aplikasi Rekap Otomatis & Verifikasi Rekening Supplier WSF")
 st.markdown("""
-Aplikasi ini secara otomatis **merekap seluruh data pengajuan transfer (FPT)**, mengekstrak **Hari & Tanggal**, serta melakukan **verifikasi nomor rekening** pengajuan terhadap **Database Master Rekening Supplier**.
+Aplikasi ini secara otomatis **merekap seluruh data pengajuan transfer (FPT)** dan melakukan **verifikasi nomor rekening** pengajuan terhadap **Database Master Rekening Supplier**.
 """)
 
 st.sidebar.header("📁 Upload File")
@@ -63,69 +62,41 @@ if master_db:
 else:
     st.sidebar.error(f"❌ Database belum terbaca. Status: {db_info}")
 
-# 2. Fungsi Ekstraksi Hari & Tanggal Fleksibel
-def extract_header_info(df):
-    hari = ""
-    tanggal = ""
-    num_rows, num_cols = len(df), len(df.columns)
-    
-    for r in range(min(15, num_rows)): # Cari di 15 baris pertama
-        for c in range(num_cols):
-            cell_raw = df.iloc[r, c]
-            cell_str = str(cell_raw).strip() if pd.notna(cell_raw) else ""
-            cell_upper = cell_str.upper()
-            
-            # Kasus 1: "HARI / TANGGAL : SENIN / 10 OKTOBER 2023"
-            if "HARI" in cell_upper and "TANGGAL" in cell_upper:
-                parts = cell_str.split(":")
-                if len(parts) > 1:
-                    val_part = parts[1].strip()
-                    if "/" in val_part:
-                        sub_p = val_part.split("/")
-                        hari = sub_p[0].strip()
-                        tanggal = sub_p[1].strip()
-                    elif "," in val_part:
-                        sub_p = val_part.split(",")
-                        hari = sub_p[0].strip()
-                        tanggal = sub_p[1].strip()
-            
-            # Kasus 2: "HARI :" atau "HARI" tersendiri
-            elif "HARI" in cell_upper and not hari:
-                if ":" in cell_str:
-                    hari = cell_str.split(":")[-1].strip()
-                elif c + 1 < num_cols and pd.notna(df.iloc[r, c+1]):
-                    next_val = str(df.iloc[r, c+1]).strip()
-                    hari = next_val.replace(":", "").strip()
-            
-            # Kasus 3: "TANGGAL :" atau "TANGGAL" tersendiri
-            elif "TANGGAL" in cell_upper and not tanggal:
-                if ":" in cell_str:
-                    tanggal = cell_str.split(":")[-1].strip()
-                elif c + 1 < num_cols and pd.notna(df.iloc[r, c+1]):
-                    next_val = df.iloc[r, c+1]
-                    if isinstance(next_val, pd.Timestamp):
-                        tanggal = next_val.strftime('%d/%m/%Y')
-                    else:
-                        tanggal = str(next_val).replace(":", "").strip()
-                        
-    return hari, tanggal
-
-# 3. Fungsi Olah File FPT
+# 2. Fungsi Olah File FPT (Dengan Logika Hari & Tanggal Asli yang Bekerja)
 def process_file(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
     all_rows = []
     
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(uploaded_file, sheet_name=sheet_name, header=None)
-        
-        # Deteksi Hari & Tanggal Header
-        current_hari, current_tanggal = extract_header_info(df)
-        
+        current_hari, current_tanggal = "", ""
         num_rows, num_cols = len(df), len(df.columns)
+        
         i = 0
         while i < num_rows:
             row_vals = [str(val).strip() if pd.notna(val) else "" for val in df.iloc[i].values]
             row_str_upper = " ".join(row_vals).upper()
+            
+            # Pindai Hari & Tanggal langsung dari setiap baris sel
+            for col_idx in range(num_cols):
+                cell_raw = df.iloc[i, col_idx]
+                cell_val = str(cell_raw).strip() if pd.notna(cell_raw) else ""
+                cell_upper = cell_val.upper()
+                
+                if "HARI" in cell_upper and ":" in cell_val:
+                    current_hari = cell_val.split(":")[-1].strip()
+                elif "HARI" in cell_upper and col_idx + 1 < num_cols and pd.notna(df.iloc[i, col_idx + 1]):
+                    next_v = str(df.iloc[i, col_idx + 1]).replace(":", "").strip()
+                    if next_v: current_hari = next_v
+
+                if "TANGGAL" in cell_upper and ":" in cell_val:
+                    current_tanggal = cell_val.split(":")[-1].strip()
+                elif "TANGGAL" in cell_upper and col_idx + 1 < num_cols and pd.notna(df.iloc[i, col_idx + 1]):
+                    next_v = df.iloc[i, col_idx + 1]
+                    if isinstance(next_v, pd.Timestamp):
+                        current_tanggal = next_v.strftime('%d/%m/%Y')
+                    else:
+                        current_tanggal = str(next_v).replace(":", "").strip()
 
             if any(exc in row_str_upper for exc in ["DIAJUKAN OLEH", "MENGETAHUI", "ALFIAN", "ACHMAD KOHAR", "ADM. TRADING", "MANAJER SBB"]):
                 i += 1
