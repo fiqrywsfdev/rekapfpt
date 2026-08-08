@@ -213,7 +213,6 @@ def process_file(uploaded_file):
                     else ""
                 )
 
-                # Format tanggal
                 if isinstance(
                     next_cell,
                     (
@@ -235,7 +234,7 @@ def process_file(uploaded_file):
                     )
 
                 # ==========================================
-                # PINDAI HARI
+                # HARI
                 # ==========================================
 
                 if (
@@ -268,7 +267,7 @@ def process_file(uploaded_file):
                     )
 
                 # ==========================================
-                # PINDAI TANGGAL
+                # TANGGAL
                 # ==========================================
 
                 if (
@@ -348,10 +347,6 @@ def process_file(uploaded_file):
             ):
 
                 try:
-
-                    # ==========================================
-                    # AMBIL DATA
-                    # ==========================================
 
                     bw = (
                         str(
@@ -449,7 +444,7 @@ def process_file(uploaded_file):
                     )
 
                     # ==========================================
-                    # NAMA REKENING BARIS BERIKUTNYA
+                    # NAMA REKENING
                     # ==========================================
 
                     namarek = ""
@@ -562,13 +557,13 @@ def process_file(uploaded_file):
 
 
 # ==========================================
-# 3. TAMPILAN UTAMA
+# 3. MAIN
 # ==========================================
 
 if uploaded_files:
 
     # ==========================================
-    # PROSES SEMUA FILE
+    # PROSES FILE
     # ==========================================
 
     dfs = [
@@ -582,7 +577,7 @@ if uploaded_files:
     )
 
     # ==========================================
-    # VERIFIKASI DATABASE REKENING
+    # VERIFIKASI REKENING
     # ==========================================
 
     if (
@@ -605,10 +600,6 @@ if uploaded_files:
                 row["NOMOR REKENING"]
             )
 
-            # ==========================================
-            # CARI SUPPLIER DI DATABASE
-            # ==========================================
-
             matched_supplier = None
 
             for db_supp_key in master_db:
@@ -620,10 +611,6 @@ if uploaded_files:
 
                     matched_supplier = db_supp_key
                     break
-
-            # ==========================================
-            # SUPPLIER DITEMUKAN
-            # ==========================================
 
             if matched_supplier:
 
@@ -665,10 +652,6 @@ if uploaded_files:
                         "⚠️ BEDA REKENING!"
                     )
 
-            # ==========================================
-            # SUPPLIER TIDAK TERDAFTAR
-            # ==========================================
-
             else:
 
                 status_verifikasi.append(
@@ -686,118 +669,13 @@ if uploaded_files:
         ] = referensi_db
 
     # ==========================================
-    # TOTAL TRANSAKSI
+    # TOTAL DATA
     # ==========================================
 
     st.success(
         f"Berhasil merekap total "
         f"**{len(final_df):,}** baris transaksi!"
     )
-
-    # ==========================================
-    # PISAHKAN TF & RK BERDASARKAN SHEET
-    # ==========================================
-
-    sheet_text = (
-        final_df["SHEET"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    # HANYA SHEET BERNAMA RK YANG MASUK RK
-    is_rk = sheet_text == "RK"
-
-    df_rk = final_df[
-        is_rk
-    ].copy()
-
-    # SEMUA SELAIN RK MASUK TF
-    df_tf = final_df[
-        ~is_rk
-    ].copy()
-
-    # ==========================================
-    # KPI
-    # ==========================================
-
-    k1, k2, k3 = st.columns(3)
-
-    with k1:
-
-        st.metric(
-            "📊 TOTAL TRANSAKSI",
-            f"{len(final_df):,}"
-        )
-
-    with k2:
-
-        st.metric(
-            "💸 TOTAL TF",
-            f"{len(df_tf):,}"
-        )
-
-    with k3:
-
-        st.metric(
-            "🏦 TOTAL RK",
-            f"{len(df_rk):,}"
-        )
-
-    # ==========================================
-    # ALERT VERIFIKASI REKENING
-    # ==========================================
-
-    if (
-        "STATUS REKENING (VERIFIKASI)"
-        in final_df.columns
-    ):
-
-        jml_beda = (
-            final_df[
-                "STATUS REKENING (VERIFIKASI)"
-            ]
-            == "⚠️ BEDA REKENING!"
-        ).sum()
-
-        jml_tidak_terdaftar = (
-            final_df[
-                "STATUS REKENING (VERIFIKASI)"
-            ]
-            == "❓ SUPPLIER TIDAK TERDAFTAR"
-        ).sum()
-
-        c1, c2 = st.columns(2)
-
-        if jml_beda > 0:
-
-            c1.error(
-                f"⚠️ Ditemukan **{jml_beda}** "
-                f"pengajuan dengan "
-                f"**NOMOR REKENING BEDA!**"
-            )
-
-        else:
-
-            c1.success(
-                "✅ Tidak ada rekening yang berbeda."
-            )
-
-        if jml_tidak_terdaftar > 0:
-
-            c2.warning(
-                f"❓ Ditemukan "
-                f"**{jml_tidak_terdaftar}** "
-                f"Supplier belum ada di "
-                f"Database Master."
-            )
-
-        else:
-
-            c2.success(
-                "✅ Semua supplier terdaftar."
-            )
 
     # ==========================================
     # FILTER
@@ -850,7 +728,7 @@ if uploaded_files:
         )
 
     # ==========================================
-    # APPLY FILTER
+    # FILTER DATA
     # ==========================================
 
     filtered_df = final_df.copy()
@@ -884,8 +762,8 @@ if uploaded_files:
         ]
 
     # ==========================================
-    # PISAHKAN HASIL FILTER TF / RK
-    # BERDASARKAN NAMA SHEET
+    # PISAHKAN RPA TF DAN RPA RK
+    # BERDASARKAN KOLOM SHEET
     # ==========================================
 
     filtered_sheet_text = (
@@ -896,38 +774,103 @@ if uploaded_files:
         .str.upper()
     )
 
-    filtered_is_rk = (
-        filtered_sheet_text == "RK"
+    # ==========================================
+    # RPA RK
+    # ==========================================
+
+    is_rk = filtered_sheet_text.str.contains(
+        "RPA RK",
+        case=False,
+        regex=False,
+        na=False
     )
 
     filtered_rk = filtered_df[
-        filtered_is_rk
-    ].copy()
-
-    filtered_tf = filtered_df[
-        ~filtered_is_rk
+        is_rk
     ].copy()
 
     # ==========================================
-    # TAMPILAN TAB TF & RK
+    # RPA TF
+    # ==========================================
+
+    is_tf = filtered_sheet_text.str.contains(
+        "RPA TF",
+        case=False,
+        regex=False,
+        na=False
+    )
+
+    filtered_tf = filtered_df[
+        is_tf
+    ].copy()
+
+    # ==========================================
+    # DATA SHEET LAIN
+    # ==========================================
+
+    other_df = filtered_df[
+        ~is_rk & ~is_tf
+    ].copy()
+
+    # ==========================================
+    # KPI
+    # ==========================================
+
+    k1, k2, k3 = st.columns(3)
+
+    with k1:
+
+        st.metric(
+            "📊 TOTAL TRANSAKSI",
+            f"{len(filtered_df):,}"
+        )
+
+    with k2:
+
+        st.metric(
+            "💸 RPA TF",
+            f"{len(filtered_tf):,}"
+        )
+
+    with k3:
+
+        st.metric(
+            "🏦 RPA RK",
+            f"{len(filtered_rk):,}"
+        )
+
+    # ==========================================
+    # ALERT DATA SHEET LAIN
+    # ==========================================
+
+    if len(other_df) > 0:
+
+        st.warning(
+            f"⚠️ Ada **{len(other_df):,}** "
+            f"transaksi dari sheet yang bukan "
+            f"**RPA TF** atau **RPA RK**."
+        )
+
+    # ==========================================
+    # TAMPILAN DATA
     # ==========================================
 
     st.subheader("📋 Data Rekap")
 
     tab_tf, tab_rk = st.tabs([
-        "💸 TF",
-        "🏦 RK"
+        "💸 RPA TF",
+        "🏦 RPA RK"
     ])
 
     # ==========================================
-    # TAB TF
+    # TAB RPA TF
     # ==========================================
 
     with tab_tf:
 
         st.caption(
-            f"Total transaksi TF: "
-            f"**{len(filtered_tf):,}**"
+            f"Total RPA TF: "
+            f"**{len(filtered_tf):,}** transaksi"
         )
 
         st.dataframe(
@@ -937,14 +880,14 @@ if uploaded_files:
         )
 
     # ==========================================
-    # TAB RK
+    # TAB RPA RK
     # ==========================================
 
     with tab_rk:
 
         st.caption(
-            f"Total transaksi RK: "
-            f"**{len(filtered_rk):,}**"
+            f"Total RPA RK: "
+            f"**{len(filtered_rk):,}** transaksi"
         )
 
         st.dataframe(
@@ -965,7 +908,7 @@ if uploaded_files:
     ) as writer:
 
         # ==========================================
-        # TAB TF
+        # TAB RPA TF
         # ==========================================
 
         filtered_tf.to_excel(
@@ -975,7 +918,7 @@ if uploaded_files:
         )
 
         # ==========================================
-        # TAB RK
+        # TAB RPA RK
         # ==========================================
 
         filtered_rk.to_excel(
@@ -999,7 +942,7 @@ if uploaded_files:
             # Freeze header
             worksheet.freeze_panes = "A2"
 
-            # Auto width kolom
+            # Auto width
             for column_cells in worksheet.columns:
 
                 max_length = 0
@@ -1020,6 +963,7 @@ if uploaded_files:
                         )
 
                         if cell_length > max_length:
+
                             max_length = cell_length
 
                     except Exception:
@@ -1057,3 +1001,4 @@ else:
         "📁 Silakan upload file Form Pengajuan "
         "Transfer (.xlsx) melalui menu di sebelah kiri."
     )
+
