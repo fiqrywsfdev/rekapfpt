@@ -25,7 +25,7 @@ dari file Excel WSF secara otomatis per baris lengkap sekaligus
 """)
 
 # ==========================================
-# SIDEBAR UPLOAD
+# UPLOAD FILE
 # ==========================================
 
 st.sidebar.header("📁 Upload File")
@@ -109,7 +109,9 @@ def load_master_database():
                     else ""
                 )
 
-                norek_val = clean_str(r["No. Rekening"])
+                norek_val = clean_str(
+                    r["No. Rekening"]
+                )
 
                 namarek_val = (
                     str(r["Atas Nama"]).strip()
@@ -187,7 +189,9 @@ def process_file(uploaded_file):
                 for val in df.iloc[i].values
             ]
 
-            row_str_upper = " ".join(row_vals).upper()
+            row_str_upper = " ".join(
+                row_vals
+            ).upper()
 
             # ==========================================
             # EXTRACT HARI & TANGGAL
@@ -212,7 +216,10 @@ def process_file(uploaded_file):
                 # Format tanggal
                 if isinstance(
                     next_cell,
-                    (pd.Timestamp, datetime.datetime)
+                    (
+                        pd.Timestamp,
+                        datetime.datetime
+                    )
                 ):
 
                     next_val_str = next_cell.strftime(
@@ -237,10 +244,15 @@ def process_file(uploaded_file):
                 ):
 
                     current_hari = (
-                        cell_val.split(":")[-1].strip()
+                        cell_val
+                        .split(":")[-1]
+                        .strip()
                     )
 
-                    if not current_hari and next_val_str:
+                    if (
+                        not current_hari
+                        and next_val_str
+                    ):
 
                         current_hari = next_val_str
 
@@ -265,10 +277,15 @@ def process_file(uploaded_file):
                 ):
 
                     raw_tgl = (
-                        cell_val.split(":")[-1].strip()
+                        cell_val
+                        .split(":")[-1]
+                        .strip()
                     )
 
-                    if not raw_tgl and next_val_str:
+                    if (
+                        not raw_tgl
+                        and next_val_str
+                    ):
 
                         raw_tgl = next_val_str
 
@@ -305,14 +322,20 @@ def process_file(uploaded_file):
                 1
                 if (
                     num_cols > 10
-                    and str(df.iloc[i, 1]).strip() != ""
+                    and str(
+                        df.iloc[i, 1]
+                    ).strip() != ""
                 )
                 else 0
             )
 
             supp_val = (
-                str(df.iloc[i, col_supp]).strip()
-                if pd.notna(df.iloc[i, col_supp])
+                str(
+                    df.iloc[i, col_supp]
+                ).strip()
+                if pd.notna(
+                    df.iloc[i, col_supp]
+                )
                 else ""
             )
 
@@ -398,7 +421,10 @@ def process_file(uploaded_file):
                             i,
                             col_supp + 7
                         ]
-                        if col_supp + 7 < num_cols
+                        if (
+                            col_supp + 7
+                            < num_cols
+                        )
                         else total
                     )
 
@@ -410,7 +436,8 @@ def process_file(uploaded_file):
                             ]
                         ).strip()
                         if (
-                            col_supp + 8 < num_cols
+                            col_supp + 8
+                            < num_cols
                             and pd.notna(
                                 df.iloc[
                                     i,
@@ -513,9 +540,13 @@ def process_file(uploaded_file):
                             "NAMA REKENING": namarek,
 
                             "NOMINAL TRANSFER (RP)":
-                                nominal_num
-                                if pd.notna(nominal_num)
-                                else total_num,
+                                (
+                                    nominal_num
+                                    if pd.notna(
+                                        nominal_num
+                                    )
+                                    else total_num
+                                ),
 
                             "KETERANGAN / STATUS": ket
 
@@ -575,7 +606,7 @@ if uploaded_files:
             )
 
             # ==========================================
-            # CARI SUPPLIER
+            # CARI SUPPLIER DI DATABASE
             # ==========================================
 
             matched_supplier = None
@@ -635,7 +666,7 @@ if uploaded_files:
                     )
 
             # ==========================================
-            # SUPPLIER TIDAK DITEMUKAN
+            # SUPPLIER TIDAK TERDAFTAR
             # ==========================================
 
             else:
@@ -655,7 +686,7 @@ if uploaded_files:
         ] = referensi_db
 
     # ==========================================
-    # INFORMASI TOTAL
+    # TOTAL TRANSAKSI
     # ==========================================
 
     st.success(
@@ -664,49 +695,58 @@ if uploaded_files:
     )
 
     # ==========================================
-    # HITUNG TF DAN RK
+    # PISAHKAN TF & RK BERDASARKAN SHEET
     # ==========================================
 
-    status_text = (
-        final_df["KETERANGAN / STATUS"]
+    sheet_text = (
+        final_df["SHEET"]
         .fillna("")
         .astype(str)
+        .str.strip()
         .str.upper()
     )
 
-    is_rk = status_text.str.contains(
-        r"\bRK\b",
-        regex=True,
-        na=False
-    )
+    # HANYA SHEET BERNAMA RK YANG MASUK RK
+    is_rk = sheet_text == "RK"
 
-    df_rk = final_df[is_rk].copy()
+    df_rk = final_df[
+        is_rk
+    ].copy()
 
-    df_tf = final_df[~is_rk].copy()
+    # SEMUA SELAIN RK MASUK TF
+    df_tf = final_df[
+        ~is_rk
+    ].copy()
 
     # ==========================================
-    # KPI TF / RK
+    # KPI
     # ==========================================
 
     k1, k2, k3 = st.columns(3)
 
-    k1.metric(
-        "📊 TOTAL TRANSAKSI",
-        f"{len(final_df):,}"
-    )
+    with k1:
 
-    k2.metric(
-        "💸 TOTAL TF",
-        f"{len(df_tf):,}"
-    )
+        st.metric(
+            "📊 TOTAL TRANSAKSI",
+            f"{len(final_df):,}"
+        )
 
-    k3.metric(
-        "🏦 TOTAL RK",
-        f"{len(df_rk):,}"
-    )
+    with k2:
+
+        st.metric(
+            "💸 TOTAL TF",
+            f"{len(df_tf):,}"
+        )
+
+    with k3:
+
+        st.metric(
+            "🏦 TOTAL RK",
+            f"{len(df_rk):,}"
+        )
 
     # ==========================================
-    # ALERT REKENING
+    # ALERT VERIFIKASI REKENING
     # ==========================================
 
     if (
@@ -810,7 +850,7 @@ if uploaded_files:
         )
 
     # ==========================================
-    # FILTER DATA
+    # APPLY FILTER
     # ==========================================
 
     filtered_df = final_df.copy()
@@ -845,21 +885,19 @@ if uploaded_files:
 
     # ==========================================
     # PISAHKAN HASIL FILTER TF / RK
+    # BERDASARKAN NAMA SHEET
     # ==========================================
 
-    filtered_status_text = (
-        filtered_df[
-            "KETERANGAN / STATUS"
-        ]
+    filtered_sheet_text = (
+        filtered_df["SHEET"]
         .fillna("")
         .astype(str)
+        .str.strip()
         .str.upper()
     )
 
-    filtered_is_rk = filtered_status_text.str.contains(
-        r"\bRK\b",
-        regex=True,
-        na=False
+    filtered_is_rk = (
+        filtered_sheet_text == "RK"
     )
 
     filtered_rk = filtered_df[
@@ -871,7 +909,7 @@ if uploaded_files:
     ].copy()
 
     # ==========================================
-    # TAMPILAN DATA TF & RK
+    # TAMPILAN TAB TF & RK
     # ==========================================
 
     st.subheader("📋 Data Rekap")
@@ -880,6 +918,10 @@ if uploaded_files:
         "💸 TF",
         "🏦 RK"
     ])
+
+    # ==========================================
+    # TAB TF
+    # ==========================================
 
     with tab_tf:
 
@@ -893,6 +935,10 @@ if uploaded_files:
             use_container_width=True,
             hide_index=True
         )
+
+    # ==========================================
+    # TAB RK
+    # ==========================================
 
     with tab_rk:
 
@@ -908,7 +954,7 @@ if uploaded_files:
         )
 
     # ==========================================
-    # DOWNLOAD EXCEL 2 TAB
+    # DOWNLOAD EXCEL
     # ==========================================
 
     output = BytesIO()
@@ -918,14 +964,20 @@ if uploaded_files:
         engine="openpyxl"
     ) as writer:
 
+        # ==========================================
         # TAB TF
+        # ==========================================
+
         filtered_tf.to_excel(
             writer,
             index=False,
             sheet_name="TF"
         )
 
+        # ==========================================
         # TAB RK
+        # ==========================================
+
         filtered_rk.to_excel(
             writer,
             index=False,
@@ -940,18 +992,21 @@ if uploaded_files:
 
         for sheet_name in ["TF", "RK"]:
 
-            worksheet = workbook[sheet_name]
+            worksheet = workbook[
+                sheet_name
+            ]
 
             # Freeze header
             worksheet.freeze_panes = "A2"
 
-            # Auto width
+            # Auto width kolom
             for column_cells in worksheet.columns:
 
                 max_length = 0
 
                 column_letter = (
-                    column_cells[0].column_letter
+                    column_cells[0]
+                    .column_letter
                 )
 
                 for cell in column_cells:
@@ -997,10 +1052,6 @@ if uploaded_files:
     )
 
 else:
-
-    # ==========================================
-    # JIKA BELUM UPLOAD
-    # ==========================================
 
     st.info(
         "📁 Silakan upload file Form Pengajuan "
